@@ -816,6 +816,11 @@ class RetrieverSkeleton(ConfigurableBase):
                     # Strip it out.
                     fields = msgid.split('/')
                     msgid = '/'.join([fields[0], fields[2]])
+
+                if '\0' in timestamp:
+                    (timestamp, msgsize) = timestamp.split('\0', 1)
+                    self.msgsizes[msgid] = int(msgsize)
+
                 self.oldmail[msgid] = int(timestamp)
             except ValueError:
                 # malformed
@@ -849,7 +854,7 @@ class RetrieverSkeleton(ConfigurableBase):
                 self.log.debug('msgid %s ...' % msgid)
                 t = self.oldmail.get(msgid, self.timestamp)
                 self.log.debug(' timestamp %s' % t + os.linesep)
-                oldmailfile.write('%s\0%i%s' % (msgid, t, os.linesep))
+                oldmailfile.write('%s\0%i\0%i%s' % (msgid, t, self.msgsizes.get(msgid, 0), os.linesep))
                 wrote += 1
             oldmailfile.close()
             self.log.moreinfo('wrote %i uids for %s%s'
@@ -1465,9 +1470,15 @@ class IMAPRetrieverBase(RetrieverSkeleton):
                     self._mboxuids[msgid] = r['uid']
                     self._mboxuidorder.append(msgid)
                     self.msgnum_by_msgid[msgid] = None
-                    self.msgsizes[msgid] = (0 if 
+                    new_msgsize = (0 if
                         self.app_options['skip_imap_fetch_size']
                                         else int(r['rfc822.size']))
+                    if new_msgsize > 0:
+                        if msgid in self.msgsizes and self.msgsizes[msgid] > 0:
+                            if new_msgsize != self.msgsizes[msgid]:
+                               raise getmailOperationError("State error: UID %s changed size from %i to %i" % (msgid, self.msgsizes[msgid], new_msgsize))
+                        else:
+                            self.msgsizes[msgid] = new_msgsize
 
             # Remove messages from state file that are no longer in mailbox,
             # but only if the timestamp for them are old (30 days for now).
